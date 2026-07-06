@@ -108,6 +108,12 @@ impl Cli {
             }
 
             let m = Matrix::read(self.matrix.as_deref())?;
+            if m.data.iter().any(|v| v.is_nan()) {
+                return Err(RsomicsError::InvalidInput(
+                    "input contains NaN/NA; KBinsDiscretizer does not accept missing values".into(),
+                ));
+            }
+
             let strategy = match self.strategy {
                 StrategyArg::Uniform => Strategy::Uniform,
                 StrategyArg::Quantile => Strategy::Quantile,

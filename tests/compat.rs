@@ -200,6 +200,61 @@ fn no_header_quantile_n10_ordinal() {
     assert_eq!(got, expected, "headerless 15x3 quantile n10 ordinal");
 }
 
+#[test]
+fn degenerate_quantile_collapse_n5_ordinal() {
+    // A near-constant column whose quantile edges dedup to a single edge:
+    // sklearn reports n_bins_=0 and maps every value to bin 0 (no panic).
+    let got = run_ordinal(
+        &[
+            "--strategy",
+            "quantile",
+            "--n-bins",
+            "5",
+            "--encode",
+            "ordinal",
+        ],
+        &golden("degenerate_quantile.tsv"),
+    );
+    let expected = read_golden_codes(&golden("degenerate_quantile_n5_ordinal.tsv"));
+    assert_eq!(
+        got, expected,
+        "collapsed quantile column must match sklearn"
+    );
+}
+
+/// Run the binary expecting a clean loud failure (non-zero exit, no panic).
+fn run_expect_failure(input_file: &Path) {
+    let out = Command::new(binary())
+        .args(["--strategy", "quantile", "--n-bins", "5"])
+        .arg(input_file)
+        .output()
+        .expect("binary not found");
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit on NaN input, got success"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("panicked"),
+        "must fail loud, not panic: {stderr}"
+    );
+    assert!(
+        stderr.contains("NaN"),
+        "error must name the NaN cause: {stderr}"
+    );
+}
+
+#[test]
+fn all_nan_column_fails_loud() {
+    // sklearn raises ValueError 'Input X contains NaN'; we must fail loud, not panic.
+    run_expect_failure(&golden("all_nan.tsv"));
+}
+
+#[test]
+fn nan_containing_column_fails_loud() {
+    run_expect_failure(&golden("mixed_nan.tsv"));
+}
+
 // ─── onehot-dense ─────────────────────────────────────────────────────────────
 
 fn run_onehot(args: &[&str], input_file: &Path) -> Vec<Vec<i64>> {

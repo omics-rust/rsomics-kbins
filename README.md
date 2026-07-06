@@ -59,7 +59,12 @@ bit-identical to scikit-learn's `bin_edges_` on the same data.
   method=quantile_method)`. `averaged-inverted-cdf` matches sklearn 1.9.0's
   default (NumPy type-2); `linear` matches sklearn <1.9.0 (NumPy type-7).
   Consecutive-equal edges (≤ 1e-8 apart) are deduplicated exactly as sklearn
-  does, collapsing bins for tied or constant columns.
+  does, collapsing bins for tied or constant columns. A near-constant column
+  whose edges all collapse leaves a single edge — like sklearn, that feature
+  reports `n_bins_ = 0` and every value maps to bin 0.
+
+A `NaN`/`NA` cell is rejected with a loud error, matching sklearn's
+`ValueError: Input X contains NaN`.
 
 Golden files in `tests/golden/` were generated once from sklearn 1.9.0
 (numpy seed 42) and are frozen. The compat test runs the binary against them

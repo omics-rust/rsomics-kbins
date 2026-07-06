@@ -15,7 +15,9 @@
 //! Edges = `np.percentile(col, percentile_levels, method=<quantile_method>)`.
 //! Consecutive-equal edges (≤ 1e-8 apart) are deduplicated (sklearn removes
 //! bins whose width is too small with a warning; we replicate the dedup).
-//! Constant columns collapse the same way.
+//! A near-constant column whose edges all collapse leaves a single edge —
+//! sklearn reports `n_bins_ = 0` and maps every value to bin 0; we match that.
+//! Exactly-constant columns are special-cased to a single `(−∞, +∞)` bin.
 //!
 //! ## Transform
 //! `np.searchsorted(bin_edges[j][1:-1], x, side='right')` followed by
@@ -114,6 +116,12 @@ pub fn fit(
 pub fn transform_row(row: &mut [f64], fitted: &Fitted) {
     for (j, v) in row.iter_mut().enumerate() {
         let edges = &fitted.bin_edges[j];
+        // A collapsed column (single surviving edge, n_bins == 0) has an empty
+        // inner-edge slice, so np.searchsorted maps every value to bin 0.
+        if edges.len() < 2 {
+            *v = 0.0;
+            continue;
+        }
         // Inner edges = edges[1..len-1] (strip outer fences).
         let inner = &edges[1..edges.len() - 1];
         // np.searchsorted(inner, v, side='right'): index where v would insert
@@ -131,9 +139,13 @@ pub fn onehot_row(ordinal_row: &[f64], fitted: &Fitted) -> Vec<f64> {
     let mut out = vec![0.0f64; total_cols];
     let mut offset = 0;
     for (j, &v) in ordinal_row.iter().enumerate() {
-        let bin = v as usize;
-        out[offset + bin] = 1.0;
-        offset += fitted.n_bins[j];
+        let nb = fitted.n_bins[j];
+        // A collapsed column contributes zero indicator columns; skip so its
+        // bin-0 write does not land in the next column's block.
+        if nb > 0 {
+            out[offset + v as usize] = 1.0;
+        }
+        offset += nb;
     }
     out
 }
@@ -264,6 +276,29 @@ mod tests {
         );
         assert_eq!(f.n_bins[0], 2);
         assert_eq!(f.bin_edges[0], [1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn quantile_full_collapse_yields_zero_bins() {
+        // Near-constant column: min != max but every quantile edge collapses
+        // under the 1e-8 dedup, leaving a single edge. sklearn: n_bins_=0,
+        // bin_edges_=[1.0], transform maps every value to 0 (no panic).
+        let col = vec![1.0, 1.000000001, 1.0, 1.000000001];
+        let f = fit(
+            &col,
+            4,
+            1,
+            5,
+            Strategy::Quantile,
+            QuantileMethod::AveragedInvertedCdf,
+        );
+        assert_eq!(f.n_bins[0], 0);
+        assert_eq!(f.bin_edges[0], [1.0]);
+        for &v in &col {
+            let mut row = [v];
+            transform_row(&mut row, &f);
+            assert_eq!(row[0], 0.0);
+        }
     }
 
     #[test]
